@@ -48,19 +48,85 @@ class AuthController extends Controller
     }
 
     /**
-     * POST /api/auth/2fa/verify
-     * Reserved for Phase 2.2 - TOTP verification
+     * POST /api/auth/2fa/setup
+     * Generates unconfirmed Base32 secret, otpauth:// URI, and local SVG QR code.
      */
-    public function verifyTwoFactor(Request $request): Response
+    public function setupTwoFactor(Request $request): Response
     {
-        $validationError = $this->validateRequired($request, ['code']);
-        if ($validationError) {
-            return $validationError;
+        $result = \App\Services\AuthService::setupTwoFactor($request);
+
+        if (!$result['success']) {
+            return $this->error(
+                $result['message'],
+                [],
+                $result['status'] ?? 400
+            );
         }
 
         return $this->success(
-            ['status' => '2fa_endpoint_ready'],
-            '2FA verification endpoint initialized (Phase 2.2 target)'
+            $result['data'],
+            $result['message'],
+            $result['status'] ?? 200
+        );
+    }
+
+    /**
+     * POST /api/auth/2fa/verify
+     * Verifies TOTP code or single-use recovery code.
+     * Completes 2FA enrollment or upgrades 2fa_pending session to authenticated.
+     */
+    public function verifyTwoFactor(Request $request): Response
+    {
+        $code = $request->input('code');
+        $recoveryCode = $request->input('recovery_code');
+
+        if (($code === null || trim((string) $code) === '') && ($recoveryCode === null || trim((string) $recoveryCode) === '')) {
+            return $this->error('A 6-digit verification code or recovery code is required.', [
+                'code' => 'Verification code or recovery code is required.',
+            ], 400);
+        }
+
+        $result = \App\Services\AuthService::verifyTwoFactor(
+            $code !== null ? (string) $code : null,
+            $recoveryCode !== null ? (string) $recoveryCode : null,
+            $request
+        );
+
+        if (!$result['success']) {
+            return $this->error(
+                $result['message'],
+                [],
+                $result['status'] ?? 401
+            );
+        }
+
+        return $this->success(
+            $result['data'],
+            $result['message'],
+            $result['status'] ?? 200
+        );
+    }
+
+    /**
+     * GET /api/auth/2fa/status
+     * Returns safe status of two-factor authentication for current session user.
+     */
+    public function twoFactorStatus(Request $request): Response
+    {
+        $result = \App\Services\AuthService::getTwoFactorStatus();
+
+        if (!$result['success']) {
+            return $this->error(
+                $result['message'],
+                [],
+                $result['status'] ?? 401
+            );
+        }
+
+        return $this->success(
+            $result['data'],
+            $result['message'],
+            $result['status'] ?? 200
         );
     }
 

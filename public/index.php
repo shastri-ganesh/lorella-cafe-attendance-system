@@ -67,7 +67,14 @@ $router->group(['prefix' => '/api'], function (Router $api) {
         $auth->post('/login', [AuthController::class, 'login'], [
             RateLimitMiddleware::per(5, 900), // Max 5 attempts per 15 min window
         ]);
-        $auth->post('/2fa/verify', [AuthController::class, 'verifyTwoFactor']);
+        $auth->post('/2fa/setup', [AuthController::class, 'setupTwoFactor'], [
+            AuthMiddleware::class,
+            RateLimitMiddleware::per(5, 300),
+        ]);
+        $auth->post('/2fa/verify', [AuthController::class, 'verifyTwoFactor'], [
+            RateLimitMiddleware::per(10, 300),
+        ]);
+        $auth->get('/2fa/status', [AuthController::class, 'twoFactorStatus'], [AuthMiddleware::class]);
         $auth->post('/logout', [AuthController::class, 'logout'], [AuthMiddleware::class]);
         $auth->get('/me', [AuthController::class, 'me'], [AuthMiddleware::class]);
     });
@@ -83,13 +90,19 @@ $router->group(['prefix' => '/api'], function (Router $api) {
     // Café Management Routes
     $api->group(['prefix' => '/cafes', 'middleware' => [AuthMiddleware::class]], function (Router $cafes) {
         $cafes->get('/', [CafeController::class, 'index']);
-        $cafes->get('/{id}', [CafeController::class, 'show']);
+        $cafes->get('/{id}', [CafeController::class, 'show'], [
+            RoleMiddleware::requireCafeAccess('id'),
+        ]);
     });
 
     // User / Staff Management Routes
     $api->group(['prefix' => '/users', 'middleware' => [AuthMiddleware::class]], function (Router $users) {
-        $users->get('/', [UserController::class, 'index']);
-        $users->get('/{id}', [UserController::class, 'show']);
+        $users->get('/', [UserController::class, 'index'], [
+            RoleMiddleware::requireRole(['super_admin', 'admin', 'manager']),
+        ]);
+        $users->get('/{id}', [UserController::class, 'show'], [
+            RoleMiddleware::requireSelfOrRole(['super_admin', 'admin', 'manager'], 'id'),
+        ]);
     });
 
     // Leave Management Routes

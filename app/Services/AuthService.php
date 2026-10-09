@@ -202,6 +202,8 @@ class AuthService
 
             AuditService::log('LOGIN_PASSWORD_VERIFIED_2FA_PENDING', 'users', $userId, $userId, null, [], [], $request);
 
+            $is2faSetup = $userRepo->isTwoFactorEnabled($userId);
+
             return [
                 'success' => true,
                 'status' => 200,
@@ -209,6 +211,7 @@ class AuthService
                 'data' => [
                     'requires_2fa' => true,
                     'auth_state' => '2fa_pending',
+                    'is_2fa_setup' => $is2faSetup,
                 ],
             ];
         }
@@ -256,10 +259,15 @@ class AuthService
 
         // Check if user is in 2FA pending state
         if (!empty($_SESSION['auth_state']) && $_SESSION['auth_state'] === '2fa_pending') {
+            $pendingUserId = (int) ($_SESSION['pending_user_id'] ?? 0);
+            $userRepo ??= new \App\Repositories\UserRepository();
+            $is2faSetup = $pendingUserId > 0 ? $userRepo->isTwoFactorEnabled($pendingUserId) : false;
+
             return [
                 'authenticated' => false,
                 'auth_state' => '2fa_pending',
                 'requires_2fa' => true,
+                'is_2fa_setup' => $is2faSetup,
             ];
         }
 
@@ -325,5 +333,337 @@ class AuthService
         if (session_status() === PHP_SESSION_ACTIVE) {
             @session_destroy();
         }
+    }
+
+    /**
+     * Initialize TOTP enrollment for privileged user.
+     * Generates Base32 secret, saves unconfirmed record, and produces local SVG QR code.
+     */
+    public static function setupTwoFactor(
+        ?\App\Core\Request $request = null,
+        ?\App\Repositories\UserRepository $userRepo = null
+    ): array {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            self::startSecureSession();
+        }
+
+        $userId = $_SESSION['user_id'] ?? $_SESSION['pending_user_id'] ?? null;
+        $userRole = $_SESSION['user_role'] ?? $_SESSION['pending_role'] ?? null;
+
+        if (!$userId || !$userRole) {
+            return [
+                'success' => false,
+                'status' => 401,
+                'message' => 'Unauthenticated. Please log in first.',
+            ];
+        }
+
+        $privilegedRoles = ['manager', 'admin', 'super_admin'];
+        if (!in_array($userRole, $privilegedRoles, true)) {
+            return [
+                'success' => false,
+                'status' => 403,
+                'message' => 'Forbidden: Two-factor authentication is restricted to privileged roles.',
+            ];
+        }
+
+        $userId = (int) $userId;
+        $userRepo ??= new \App\Repositories\UserRepository();
+        $user = $userRepo->findById($userId);
+
+        if (!$user || $user['status'] !== 'active') {
+            return [
+                'success' => false,
+                'status' => 401,
+                'message' => 'User account is inactive or not found.',
+            ];
+        }
+
+        if ($userRepo->isTwoFactorEnabled($userId)) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'message' => 'Two-factor authentication is already enabled and confirmed for this account.',
+            ];
+        }
+
+        $securityConfig = require dirname(__DIR__, 2) . '/config/security.php';
+        $secretLength = $securityConfig['totp']['secret_length'] ?? 16;
+        $issuer = $securityConfig['totp']['issuer'] ?? 'Lorella Cafe';
+
+        $secret = TotpService::generateSecret($secretLength);
+        $userRepo->saveTwoFactorSecret($userId, $secret);
+
+        $otpauthUri = TotpService::getOtpAuthUri($user['email'], $secret, $issuer);
+        $qrSvg = TotpService::generateQrCodeSvg($otpauthUri);
+        $qrDataUri = TotpService::generateQrCodeDataUri($otpauthUri);
+
+        AuditService::log('2FA_ENROLLMENT_STARTED', 'two_factor_auth', $userId, $userId, null, [], [], $request);
+
+        return [
+            'success' => true,
+            'status' => 200,
+            'message' => 'Two-factor authentication secret generated. Scan QR code or enter secret into authenticator app.',
+            'data' => [
+                'secret' => $secret,
+                'provisioning_uri' => $otpauthUri,
+                'qr_code_svg' => $qrSvg,
+                'qr_code_data_uri' => $qrDataUri,
+            ],
+        ];
+    }
+
+    /**
+     * Verify TOTP code or single-use recovery code.
+     * Supports both enrollment confirmation and login verification.
+     */
+    public static function verifyTwoFactor(
+        ?string $code = null,
+        ?string $recoveryCode = null,
+        ?\App\Core\Request $request = null,
+        ?\App\Repositories\UserRepository $userRepo = null
+    ): array {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            self::startSecureSession();
+        }
+
+        $userId = $_SESSION['user_id'] ?? $_SESSION['pending_user_id'] ?? null;
+        if (!$userId) {
+            return [
+                'success' => false,
+                'status' => 401,
+                'message' => 'Unauthenticated. Please log in first.',
+            ];
+        }
+
+        $userId = (int) $userId;
+        $userRepo ??= new \App\Repositories\UserRepository();
+        $user = $userRepo->findById($userId);
+
+        if (!$user || $user['status'] !== 'active') {
+            return [
+                'success' => false,
+                'status' => 401,
+                'message' => 'Account is inactive or not found.',
+            ];
+        }
+
+        $twoFactor = $userRepo->getTwoFactorRecord($userId);
+        if (!$twoFactor || empty($twoFactor['secret'])) {
+            return [
+                'success' => false,
+                'status' => 400,
+                'message' => 'Two-factor authentication is not configured for this account. Please run setup first.',
+            ];
+        }
+
+        $isConfirmed = ((int) ($twoFactor['is_enabled'] ?? 0) === 1 && !empty($twoFactor['confirmed_at']));
+        $securityConfig = require dirname(__DIR__, 2) . '/config/security.php';
+        $window = (int) ($securityConfig['totp']['window'] ?? 1);
+
+        $code = ($code !== null) ? trim($code) : null;
+        $recoveryCode = ($recoveryCode !== null) ? trim($recoveryCode) : null;
+
+        // Context A: Enrollment Confirmation
+        if (!$isConfirmed) {
+            if (!$code) {
+                return [
+                    'success' => false,
+                    'status' => 400,
+                    'message' => 'A 6-digit verification code is required to complete enrollment.',
+                ];
+            }
+
+            if (!TotpService::verifyCode($twoFactor['secret'], $code, $window)) {
+                AuditService::log('2FA_ENROLLMENT_VERIFICATION_FAILED', 'two_factor_auth', $userId, $userId, null, [], [], $request);
+                return [
+                    'success' => false,
+                    'status' => 400,
+                    'message' => 'Invalid two-factor authentication code.',
+                ];
+            }
+
+            // Valid code: Confirm 2FA, generate and store hashed recovery codes
+            $userRepo->confirmTwoFactor($userId);
+
+            $recoveryCount = (int) ($securityConfig['totp']['recovery_codes_count'] ?? 8);
+            $recovery = TotpService::generateRecoveryCodes($recoveryCount);
+            $userRepo->storeRecoveryCodes($userId, $recovery['hashed']);
+
+            AuditService::log('2FA_ENROLLMENT_CONFIRMED', 'two_factor_auth', $userId, $userId, null, [], [], $request);
+
+            // If user was logging in and awaiting 2FA, upgrade session
+            $isLoggedIn = false;
+            if (!empty($_SESSION['auth_state']) && $_SESSION['auth_state'] === '2fa_pending') {
+                $cafeIds = $userRepo->getAssignedCafeIds($userId);
+
+                $_SESSION = [];
+                $_SESSION['auth_state'] = 'authenticated';
+                $_SESSION['user_id'] = $userId;
+                $_SESSION['user_role'] = $user['role_slug'];
+                $_SESSION['user_name'] = $user['full_name'];
+                $_SESSION['user_email'] = $user['email'];
+                $_SESSION['user_cafe_ids'] = $cafeIds;
+                $_SESSION['login_time'] = time();
+
+                self::regenerateSession();
+                AuditService::log('LOGIN_2FA_SUCCESS', 'users', $userId, $userId, null, [], [], $request);
+                $isLoggedIn = true;
+            }
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'message' => 'Two-factor authentication enabled successfully. Save your recovery codes in a secure location.',
+                'data' => [
+                    'authenticated' => $isLoggedIn || ($_SESSION['auth_state'] ?? '') === 'authenticated',
+                    'requires_2fa' => false,
+                    'recovery_codes' => $recovery['plain'], // Plain codes returned ONLY once here!
+                    'user' => [
+                        'id' => (int) $user['id'],
+                        'full_name' => $user['full_name'],
+                        'email' => $user['email'],
+                        'role' => $user['role_slug'],
+                        'status' => $user['status'],
+                    ],
+                ],
+            ];
+        }
+
+        // Context B: Login Verification (2FA is confirmed)
+        if ($code !== null && $code !== '') {
+            if (!TotpService::verifyCode($twoFactor['secret'], $code, $window)) {
+                AuditService::log('LOGIN_2FA_CODE_FAILED', 'users', $userId, $userId, null, [], [], $request);
+                return [
+                    'success' => false,
+                    'status' => 401,
+                    'message' => 'Invalid two-factor authentication code.',
+                ];
+            }
+
+            $cafeIds = $userRepo->getAssignedCafeIds($userId);
+            $_SESSION = [];
+            $_SESSION['auth_state'] = 'authenticated';
+            $_SESSION['user_id'] = $userId;
+            $_SESSION['user_role'] = $user['role_slug'];
+            $_SESSION['user_name'] = $user['full_name'];
+            $_SESSION['user_email'] = $user['email'];
+            $_SESSION['user_cafe_ids'] = $cafeIds;
+            $_SESSION['login_time'] = time();
+
+            self::regenerateSession();
+            AuditService::log('LOGIN_2FA_SUCCESS', 'users', $userId, $userId, null, [], [], $request);
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'message' => 'Authentication successful.',
+                'data' => [
+                    'authenticated' => true,
+                    'requires_2fa' => false,
+                    'user' => [
+                        'id' => (int) $user['id'],
+                        'full_name' => $user['full_name'],
+                        'email' => $user['email'],
+                        'role' => $user['role_slug'],
+                        'status' => $user['status'],
+                    ],
+                ],
+            ];
+        }
+
+        if ($recoveryCode !== null && $recoveryCode !== '') {
+            $unusedRecords = $userRepo->getUnusedRecoveryCodes($userId);
+            $matchedId = TotpService::verifyRecoveryCode($recoveryCode, $unusedRecords);
+
+            if ($matchedId === null) {
+                AuditService::log('LOGIN_2FA_RECOVERY_CODE_FAILED', 'users', $userId, $userId, null, [], [], $request);
+                return [
+                    'success' => false,
+                    'status' => 401,
+                    'message' => 'Invalid or already used recovery code.',
+                ];
+            }
+
+            // Mark single-use recovery code as consumed
+            $userRepo->markRecoveryCodeUsed($matchedId);
+
+            $cafeIds = $userRepo->getAssignedCafeIds($userId);
+            $_SESSION = [];
+            $_SESSION['auth_state'] = 'authenticated';
+            $_SESSION['user_id'] = $userId;
+            $_SESSION['user_role'] = $user['role_slug'];
+            $_SESSION['user_name'] = $user['full_name'];
+            $_SESSION['user_email'] = $user['email'];
+            $_SESSION['user_cafe_ids'] = $cafeIds;
+            $_SESSION['login_time'] = time();
+
+            self::regenerateSession();
+            AuditService::log('LOGIN_2FA_RECOVERY_CODE_USED', 'users', $userId, $userId, null, [], ['recovery_code_id' => $matchedId], $request);
+
+            return [
+                'success' => true,
+                'status' => 200,
+                'message' => 'Authentication successful via recovery code.',
+                'data' => [
+                    'authenticated' => true,
+                    'requires_2fa' => false,
+                    'recovery_code_used' => true,
+                    'user' => [
+                        'id' => (int) $user['id'],
+                        'full_name' => $user['full_name'],
+                        'email' => $user['email'],
+                        'role' => $user['role_slug'],
+                        'status' => $user['status'],
+                    ],
+                ],
+            ];
+        }
+
+        return [
+            'success' => false,
+            'status' => 400,
+            'message' => 'A valid verification code or recovery code is required.',
+        ];
+    }
+
+    /**
+     * Safe two-factor authentication status query.
+     */
+    public static function getTwoFactorStatus(?\App\Repositories\UserRepository $userRepo = null): array
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            self::startSecureSession();
+        }
+
+        $userId = $_SESSION['user_id'] ?? $_SESSION['pending_user_id'] ?? null;
+        $userRole = $_SESSION['user_role'] ?? $_SESSION['pending_role'] ?? 'staff';
+
+        if (!$userId) {
+            return [
+                'success' => false,
+                'status' => 401,
+                'message' => 'Unauthenticated.',
+            ];
+        }
+
+        $userId = (int) $userId;
+        $userRepo ??= new \App\Repositories\UserRepository();
+        $record = $userRepo->getTwoFactorRecord($userId);
+
+        $enabled = $record !== null && (int) ($record['is_enabled'] ?? 0) === 1;
+        $confirmed = $record !== null && !empty($record['confirmed_at']);
+        $required = in_array($userRole, ['manager', 'admin', 'super_admin'], true);
+
+        return [
+            'success' => true,
+            'status' => 200,
+            'message' => 'Two-factor authentication status retrieved.',
+            'data' => [
+                'enabled' => $enabled,
+                'required' => $required,
+                'confirmed' => $confirmed,
+            ],
+        ];
     }
 }

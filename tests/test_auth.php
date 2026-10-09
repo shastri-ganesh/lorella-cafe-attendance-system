@@ -114,6 +114,24 @@ $testPdo->exec("
         user_agent TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE two_factor_auth (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE NOT NULL,
+        secret TEXT NOT NULL,
+        is_enabled INTEGER DEFAULT 0,
+        confirmed_at TEXT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE recovery_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        code_hash TEXT NOT NULL,
+        used_at TEXT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
 ");
 
 // Seed Roles

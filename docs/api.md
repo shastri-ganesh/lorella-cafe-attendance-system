@@ -186,13 +186,114 @@ All API endpoints reside beneath the `/api` prefix and return JSON with standard
 }
 ```
 
-#### `POST /api/auth/2fa/verify` *(Phase 2.2 Target)*
-- **Description**: Validates RFC 6238 TOTP code or recovery code.
-- **Auth**: Session with `auth_state = "2fa_pending"`.
-- **Request Body**:
+#### `POST /api/auth/2fa/setup`
+- **Description**: Generates a new Base32 TOTP secret, provisioning URI, and locally synthesized pure-PHP vector SVG QR code for authenticator apps.
+- **Auth**: Active session (Privileged role: `manager`, `admin`, `super_admin`). Allowed during `2fa_pending` or authenticated session.
+- **Rate Limit**: 5 attempts per 5 minutes.
+- **Request Body**: None.
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Two-factor authentication secret generated. Scan QR code or enter secret into authenticator app.",
+  "data": {
+    "secret": "JBSWY3DPEHPK3PXP",
+    "provisioning_uri": "otpauth://totp/Lorella%20Speciality%20Cafe:manager@lorella.cafe?secret=JBSWY3DPEHPK3PXP&issuer=Lorella%20Speciality%20Cafe",
+    "qr_code_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 45 45\" ...><path d=\"...\" fill=\"#000\"/></svg>",
+    "qr_code_data_uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0..."
+  }
+}
+```
+- **Error Responses**:
+  - `400 Bad Request`: `"Two-factor authentication is already enabled and confirmed for this account."`
+  - `401 Unauthorized`: `"Unauthenticated. Please log in first."`
+  - `403 Forbidden`: `"Forbidden: Two-factor authentication is restricted to privileged roles."`
+
+#### `POST /api/auth/2fa/verify`
+- **Description**: Verifies TOTP 6-digit code or single-use recovery code. Serves dual functions:
+  1. **Enrollment Confirmation**: Confirms unconfirmed secret, enables 2FA, and issues 8 single-use recovery codes (returned plain text exactly once).
+  2. **Login Verification**: Upgrades session from `auth_state = "2fa_pending"` to `auth_state = "authenticated"`, establishes authorized user ID and café scopes, and regenerates session ID.
+- **Auth**: Active session (`2fa_pending` or authenticated).
+- **Rate Limit**: 10 attempts per 5 minutes (enforced via `RateLimitMiddleware`, returns HTTP 429 upon excess).
+- **Request Body (TOTP Code)**:
 ```json
 {
   "code": "489123"
+}
+```
+- **Request Body (Backup Recovery Code)**:
+```json
+{
+  "recovery_code": "ABCD-1234"
+}
+```
+- **Response — Enrollment Confirmation (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Two-factor authentication enabled successfully. Save your recovery codes in a secure location.",
+  "data": {
+    "authenticated": true,
+    "requires_2fa": false,
+    "recovery_codes": [
+      "A1B2-C3D4",
+      "E5F6-G7H8",
+      "J9K0-L1M2",
+      "N3P4-Q5R6",
+      "S7T8-U9V0",
+      "W1X2-Y3Z4",
+      "B5C6-D7E8",
+      "F9G0-H1J2"
+    ],
+    "user": {
+      "id": 3,
+      "full_name": "Floor Manager",
+      "email": "manager@lorella.cafe",
+      "role": "manager",
+      "status": "active"
+    }
+  }
+}
+```
+*(Plaintext recovery codes are presented strictly once upon confirmation; subsequent responses never return recovery codes)*
+
+- **Response — Successful 2FA Login (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Authentication successful.",
+  "data": {
+    "authenticated": true,
+    "requires_2fa": false,
+    "user": {
+      "id": 3,
+      "full_name": "Floor Manager",
+      "email": "manager@lorella.cafe",
+      "role": "manager",
+      "status": "active"
+    }
+  }
+}
+```
+
+- **Error Responses**:
+  - `400 Bad Request`: `"A 6-digit verification code or recovery code is required."`
+  - `401 Unauthorized`: `"Invalid two-factor authentication code."` or `"Invalid or already used recovery code."`
+  - `429 Too Many Requests`: `"Too many requests. Please retry in 285 seconds."`
+
+#### `GET /api/auth/2fa/status`
+- **Description**: Returns safe status of two-factor authentication for the current session user without exposing secrets or code hashes.
+- **Auth**: Active session.
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Two-factor authentication status retrieved.",
+  "data": {
+    "enabled": true,
+    "required": true,
+    "confirmed": true
+  }
 }
 ```
 

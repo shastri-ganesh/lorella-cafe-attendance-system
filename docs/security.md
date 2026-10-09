@@ -77,42 +77,109 @@ Security is baked into the foundation of the Lorella Attendance platform rather 
 ### 2.4. Trusted Server-Side Identity Model
 - Clients are never permitted to declare or override their identity, role, café scope, or authentication state through request headers or body parameters (`user_id`, `role`, `cafe_id`, `auth_state`).
 - Identity and authorization boundaries are populated strictly on the server from validated database records:
-  - `$_SESSION['auth_state']`: `'authenticated'` (Staff) or `'2fa_pending'` (Privileged).
-  - `$_SESSION['user_id']`: Numeric verified primary key.
+  - `$_SESSION['auth_state']`: `'authenticated'` (Staff / post-2FA Privileged) or `'2fa_pending'`.
+  - `$_SESSION['user_id']`: Numeric verified primary key (granted only after complete authentication).
   - `$_SESSION['user_role']`: Server-resolved role slug.
   - `$_SESSION['user_cafe_ids']`: Authorized café branch primary keys.
 
 ---
 
-## 3. Two-Stage Authentication & 2FA Pending State
+## 3. Role-Based Access Control (RBAC) & Multi-Tenancy
 
-### 3.1. Role Policy
-- **Staff**: Non-privileged role. Upon password verification, granted immediate authenticated session (`auth_state = 'authenticated'`).
-- **Privileged Roles (Manager, Admin, Super Admin)**: Mandatory RFC 6238 TOTP 2FA.
+### 3.1. The Four System Roles
+The system strictly defines four roles with granular server-enforced boundaries:
 
-### 3.2. Two-Stage Authentication Architecture
-1. **Stage 1 (Password Verification)**: User submits email/login and password.
-2. **State Transition**:
-   - For privileged roles, full access is NOT granted.
-   - Session is initialized with:
-     ```php
-     $_SESSION['auth_state'] = '2fa_pending';
-     $_SESSION['2fa_pending'] = true;
-     $_SESSION['pending_user_id'] = $userId;
-     $_SESSION['pending_role'] = $roleSlug;
-     ```
-   - Privileged user ID (`$_SESSION['user_id']`) remains unset.
-3. **Middleware Enforcement (`AuthMiddleware`)**:
-   - `UNAUTHENTICATED`: Requests to protected routes rejected with HTTP 401.
-   - `2FA_PENDING`:
-     - Access to `/api/auth/me`, `/api/auth/logout`, and `/api/auth/2fa/verify` is permitted.
-     - Access to all other routes (attendance, users, cafes, leave, reports, settings) is blocked with HTTP 403 (`"Two-factor authentication verification required."`).
-4. **Stage 2 (TOTP Verification — Phase 2.2)**: User enters 6-digit TOTP code; upon successful verification, session state transitions to `auth_state = 'authenticated'` and `session_regenerate_id(true)` is executed.
+| Role | Slug | Hierarchy Weight | Scope | Key Capabilities & Boundaries |
+|---|---|:---:|---|---|
+| **Super Admin** | `super_admin` | 4 | Global | Full platform access; manages all cafés, admins, managers, staff; global reports, audit logs, and system settings. |
+| **Admin** | `admin` | 3 | Assigned Café(s) | Manages managers and staff within authorized café scope; views attendance, manages leave, and views reports for assigned branches. Cannot manage Super Admins or modify global settings. |
+| **Manager** | `manager` | 2 | Assigned Café(s) | Manages floor staff within assigned café; views staff attendance, manages leave requests, and views café-level reports. Cannot manage Admins or access other cafés. |
+| **Staff** | `staff` | 1 | Assigned Café Context | Accesses own profile, checks in/out (future), views own attendance history, submits own leave requests. Strictly prohibited from accessing other employees' records or administrative endpoints. |
 
-### 3.3. Backup Recovery Codes
-- 8 high-entropy, single-use codes (`XXXX-XXXX`) generated during enrollment.
-- Stored exclusively as password hashes (`password_hash()`) in `recovery_codes`.
-- Once verified, records are marked with `used_at = CURRENT_TIMESTAMP` and cannot be replayed.
+### 3.2. Centralized RBAC Enforcement (`RoleMiddleware`)
+All route authorization is enforced through centralized middleware:
+- **`RoleMiddleware::requireRole(array|string $roles)`**: Validates that `$_SESSION['user_role']` matches allowed roles. Unauthorized requests trigger an immutable audit event (`UNAUTHORIZED_ROLE_ACCESS_ATTEMPT`) and terminate with HTTP 403.
+- **`RoleMiddleware::requireCafeAccess(string $paramName = 'id')`**: Verifies whether the authenticated user has access to a specific branch. Super Admins possess global bypass; Admins, Managers, and Staff are strictly restricted to branches listed in `$_SESSION['user_cafe_ids']`. Unauthorized attempts log `UNAUTHORIZED_CAFE_ACCESS_ATTEMPT` and terminate with HTTP 403.
+- **`RoleMiddleware::requireSelfOrRole(array $privilegedRoles, string $paramName = 'id')`**: Enforces that staff can access only their own user ID, while authorized privileged roles can manage records.
+- **Role Escalation Protection (`canManageRole`, `canAssignRole`)**:
+  - A user cannot manage or edit accounts of equal or higher hierarchy level.
+  - A user cannot assign or promote anyone (including themselves) to a role higher than or equal to their own level.
+
+---
+
+## 4. Two-Factor Authentication (RFC 6238 TOTP)
+
+### 4.1. Mandatory 2FA Policy
+- **Staff**: Single-stage password authentication at this phase.
+- **Privileged Roles (`manager`, `admin`, `super_admin`)**: Mandatory RFC 6238 TOTP two-factor authentication. A privileged session cannot perform any operational action until 2FA is successfully verified.
+
+### 4.2. TOTP Cryptographic Specifications
+- **Algorithm**: RFC 6238 (TOTP) / RFC 4226 (HOTP) using HMAC-SHA1.
+- **Time Step**: 30 seconds.
+- **Token Format**: 6 numeric decimal digits.
+- **Secret Entropy**: 128-bit (16 cryptographically secure random bytes encoded as RFC 4648 Base32).
+- **Drift Window Tolerance**: Configurable via `config/security.php` (default `+/- 1` time window = 30s forward/backward tolerance) to accommodate device clock drift.
+- **Authenticator App Compatibility**: Google Authenticator, Microsoft Authenticator, Authy, Apple Passwords, 1Password, Bitwarden.
+
+### 4.3. Dependency-Free Local QR Provisioning (`QrCodeService`)
+- Provisioning URIs follow standard format:
+  `otpauth://totp/Lorella%20Speciality%20Cafe:<ACCOUNT>?secret=<SECRET>&issuer=Lorella%20Speciality%20Cafe`
+- **Zero Third-Party Dependency Guarantee**: TOTP secrets and provisioning URIs are **never sent to external QR generation services** (such as Google Charts or public APIs).
+- QR codes are synthesized locally by `App\Services\QrCodeService`, a pure-PHP vector SVG engine generating clean, high-contrast, scalable `<svg>` markup and Base64 Data URIs.
+
+### 4.4. 2FA Lifecycle & Verification Workflows
+
+```
+  +-------------------------------------------------------------------------+
+  |                           Password Authentication                       |
+  |                           (POST /api/auth/login)                        |
+  +-------------------------------------------------------------------------+
+                                       |
+                   +-------------------+-------------------+
+                   | (Staff)                               | (Privileged Role)
+                   v                                       v
+         +--------------------+                  +--------------------+
+         |   Authenticated    |                  |    2FA Pending     |
+         | (Full user access) |                  | (Restricted state) |
+         +--------------------+                  +--------------------+
+                                                           |
+                                      +--------------------+--------------------+
+                                      | (Not yet enrolled)                      | (Enrolled)
+                                      v                                         v
+                            +--------------------+                    +--------------------+
+                            | POST /2fa/setup    |                    | POST /2fa/verify   |
+                            | (Returns secret +  |                    | (TOTP 6-digit or   |
+                            |  local SVG QR code)|                    |  Recovery Code)    |
+                            +--------------------+                    +--------------------+
+                                      |                                         |
+                                      v                                         v
+                            +--------------------+                    +--------------------+
+                            | POST /2fa/verify   |                    | Authenticated      |
+                            | (Confirms code &   |                    | - Session regen    |
+                            |  issues 8 backup   |                    | - Full privileges  |
+                            |  recovery codes)   |                    +--------------------+
+                            +--------------------+
+```
+
+1. **Enrollment (`POST /api/auth/2fa/setup`)**:
+   - Generates Base32 secret, unconfirmed DB record (`is_enabled = 0`), and local SVG QR code.
+   - Never exposes secret in system logs or unrelated endpoints.
+2. **Enrollment Confirmation (`POST /api/auth/2fa/verify`)**:
+   - Verifies user's submitted 6-digit code against unconfirmed secret.
+   - Marks record active: `is_enabled = 1, confirmed_at = CURRENT_TIMESTAMP`.
+   - Generates 8 single-use recovery codes, stores bcrypt hashes in `recovery_codes`, and displays plain codes to user exactly once.
+3. **Login Verification (`POST /api/auth/2fa/verify`)**:
+   - Validates submitted 6-digit code or single-use recovery code.
+   - If valid: transitions session `auth_state = 'authenticated'`, assigns `user_id` and authorized café IDs, regenerates session ID (`session_regenerate_id(true)`), and audits success.
+4. **Backup Recovery Codes**:
+   - 8 high-entropy 10-character codes (`XXXX-XXXX`).
+   - Stored in database exclusively as bcrypt hashes (`password_hash`).
+   - Single-use guarantee: marked `used_at = CURRENT_TIMESTAMP` immediately upon verification; replay attempts return HTTP 401.
+5. **Brute-Force & Rate Limiting Defense**:
+   - Verification attempts on `/api/auth/2fa/verify` are sliding-window rate limited (10 requests per 5-minute window per IP) returning HTTP 429 upon excess.
+   - Timing attacks mitigated via constant-time comparisons (`hash_equals`).
+6. **Secret Omission Guarantee**:
+   - `password_hash`, `secret`, and recovery code hashes are strictly scrubbed from all API responses and audit logs.
 
 ---
 

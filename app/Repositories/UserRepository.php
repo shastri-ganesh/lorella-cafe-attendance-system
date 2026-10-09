@@ -80,6 +80,96 @@ class UserRepository
     }
 
     /**
+     * Store unconfirmed 2FA secret for user (portable between MySQL and SQLite).
+     */
+    public function saveTwoFactorSecret(int $userId, string $secret): void
+    {
+        $existing = $this->getTwoFactorRecord($userId);
+        if ($existing) {
+            $stmt = $this->db->prepare("
+                UPDATE two_factor_auth 
+                SET secret = :secret, is_enabled = 0, confirmed_at = NULL, updated_at = CURRENT_TIMESTAMP 
+                WHERE user_id = :user_id
+            ");
+        } else {
+            $stmt = $this->db->prepare("
+                INSERT INTO two_factor_auth (user_id, secret, is_enabled, confirmed_at, created_at, updated_at)
+                VALUES (:user_id, :secret, 0, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ");
+        }
+        $stmt->execute([':secret' => $secret, ':user_id' => $userId]);
+    }
+
+    /**
+     * Mark 2FA as confirmed and enabled.
+     */
+    public function confirmTwoFactor(int $userId): void
+    {
+        $stmt = $this->db->prepare("
+            UPDATE two_factor_auth 
+            SET is_enabled = 1, confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+            WHERE user_id = :user_id
+        ");
+        $stmt->execute([':user_id' => $userId]);
+    }
+
+    /**
+     * Check whether 2FA is active and confirmed for user.
+     */
+    public function isTwoFactorEnabled(int $userId): bool
+    {
+        $rec = $this->getTwoFactorRecord($userId);
+        return $rec !== null && (int) ($rec['is_enabled'] ?? 0) === 1 && !empty($rec['confirmed_at']);
+    }
+
+    /**
+     * Replace user recovery codes with newly hashed codes.
+     */
+    public function storeRecoveryCodes(int $userId, array $hashedCodes): void
+    {
+        $delStmt = $this->db->prepare("DELETE FROM recovery_codes WHERE user_id = :user_id");
+        $delStmt->execute([':user_id' => $userId]);
+
+        $insStmt = $this->db->prepare("
+            INSERT INTO recovery_codes (user_id, code_hash, used_at, created_at)
+            VALUES (:user_id, :code_hash, NULL, CURRENT_TIMESTAMP)
+        ");
+        foreach ($hashedCodes as $hash) {
+            $insStmt->execute([
+                ':user_id' => $userId,
+                ':code_hash' => $hash,
+            ]);
+        }
+    }
+
+    /**
+     * Fetch all unused recovery codes for user.
+     */
+    public function getUnusedRecoveryCodes(int $userId): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT id, user_id, code_hash, used_at, created_at 
+            FROM recovery_codes 
+            WHERE user_id = :user_id AND used_at IS NULL
+        ");
+        $stmt->execute([':user_id' => $userId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Mark single recovery code as used.
+     */
+    public function markRecoveryCodeUsed(int $recoveryCodeId): void
+    {
+        $stmt = $this->db->prepare("
+            UPDATE recovery_codes 
+            SET used_at = CURRENT_TIMESTAMP 
+            WHERE id = :id AND used_at IS NULL
+        ");
+        $stmt->execute([':id' => $recoveryCodeId]);
+    }
+
+    /**
      * Increment failed login attempts and lock account if threshold reached.
      */
     public function incrementFailedAttempts(int $userId, int $lockoutMinutes = 15, int $threshold = 5): void

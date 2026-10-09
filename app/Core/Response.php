@@ -88,6 +88,30 @@ class Response
     }
 
     /**
+     * Retrieve HTTP status code.
+     */
+    public function getStatusCode(): int
+    {
+        return $this->statusCode;
+    }
+
+    /**
+     * Retrieve headers.
+     */
+    public function getHeaders(): array
+    {
+        return $this->headers;
+    }
+
+    /**
+     * Retrieve raw content.
+     */
+    public function getContent(): mixed
+    {
+        return $this->content;
+    }
+
+    /**
      * Send headers and output body to client.
      */
     public function send(): void

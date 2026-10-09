@@ -17,6 +17,7 @@ class Request
     private array $server;
     private string $method;
     private string $path;
+    private array $params = [];
 
     public function __construct(
         ?array $get = null,
@@ -75,6 +76,31 @@ class Request
     public function isMethod(string $method): bool
     {
         return strtoupper($this->method) === strtoupper($method);
+    }
+
+    /**
+     * Set matched route parameters.
+     */
+    public function setParams(array $params): self
+    {
+        $this->params = $params;
+        return $this;
+    }
+
+    /**
+     * Retrieve single route parameter.
+     */
+    public function param(string $key, mixed $default = null): mixed
+    {
+        return $this->params[$key] ?? $default;
+    }
+
+    /**
+     * Retrieve all route parameters.
+     */
+    public function getParams(): array
+    {
+        return $this->params;
     }
 
     /**

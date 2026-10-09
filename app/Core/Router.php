@@ -142,10 +142,13 @@ class Router
         }
 
         try {
+            // Bind resolved route parameters to Request object
+            $request->setParams($params);
+
             // Execute route middleware pipeline
             foreach ($matchedRoute['middleware'] as $middleware) {
                 if (is_callable($middleware)) {
-                    $result = call_user_func($middleware, $request);
+                    $result = call_user_func($middleware, $request, $params);
                     if ($result instanceof Response) {
                         $result->send();
                         return;

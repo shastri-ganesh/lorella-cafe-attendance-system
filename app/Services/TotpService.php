@@ -91,6 +91,43 @@ class TotpService
     }
 
     /**
+     * Generate pure-PHP vector SVG QR code markup for authenticator app enrollment.
+     */
+    public static function generateQrCodeSvg(string $otpauthUri, int $size = 240): string
+    {
+        return QrCodeService::generateSvg($otpauthUri, $size);
+    }
+
+    /**
+     * Generate base64 Data URI for authenticator QR code.
+     */
+    public static function generateQrCodeDataUri(string $otpauthUri, int $size = 240): string
+    {
+        return QrCodeService::generateDataUri($otpauthUri, $size);
+    }
+
+    /**
+     * Verify a submitted recovery code against stored unused code hashes.
+     * Returns matching recovery code record ID or null if invalid.
+     */
+    public static function verifyRecoveryCode(string $plainCode, array $unusedRecords): ?int
+    {
+        $normalized = strtoupper(trim($plainCode));
+        if ($normalized === '') {
+            return null;
+        }
+
+        foreach ($unusedRecords as $record) {
+            $codeHash = $record['code_hash'] ?? '';
+            if ($codeHash !== '' && password_verify($normalized, $codeHash)) {
+                return (int) $record['id'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Calculate HOTP (RFC 4226) for given secret and counter.
      */
     private static function calculateHotp(string $secret, int $counter): string

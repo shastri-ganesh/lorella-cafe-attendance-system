@@ -50,7 +50,7 @@ class RateLimitMiddleware
             $cleanStmt->execute([':now' => date('Y-m-d H:i:s', $now)]);
 
             // Check or increment
-            $stmt = $pdo->prepare("SELECT hits, window_expires_at FROM rate_limits WHERE rate_key = :key FOR UPDATE");
+            $stmt = $pdo->prepare("SELECT hits, window_expires_at FROM rate_limits WHERE rate_key = :key");
             $stmt->execute([':key' => $rateKey]);
             $record = $stmt->fetch();
 

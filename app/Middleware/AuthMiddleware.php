@@ -46,6 +46,8 @@ class AuthMiddleware
                 '/api/auth/me',
                 '/api/auth/logout',
                 '/api/auth/2fa/verify',
+                '/api/auth/2fa/setup',
+                '/api/auth/2fa/status',
                 '/2fa.php',
             ];
 

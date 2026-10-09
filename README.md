@@ -141,13 +141,16 @@ The script will output:
 - 8 single-use backup recovery codes
 
 ### 6.4. Run Verification Test Suites
-Validate the core mathematical algorithms, autoloader, and authentication lifecycle:
+Validate the core mathematical algorithms, autoloader, authentication lifecycle, and RBAC / 2FA security controls:
 ```bash
 # Foundation Tests (Geofence, TOTP math, Autoloader, Env)
 php tests/test_foundation.php
 
 # Authentication Lifecycle Tests (Login, Sessions, Lockout, 2FA Pending, Rehash)
 php tests/test_auth.php
+
+# RBAC & 2FA Tests (Role hierarchy, Cafe boundaries, QR SVG, Recovery codes, Rate limits)
+php tests/test_rbac_2fa.php
 ```
 
 ---
@@ -163,7 +166,7 @@ php tests/test_auth.php
   - Lorella design tokens (Wine, Cream, Gold palette)
   - PWA manifest and service worker shell
   - Complete documentation suite (`/docs`)
-- [ ] **Phase 2: Authentication & TOTP 2FA Implementation**
+- [x] **Phase 2: Authentication & TOTP 2FA Implementation**
   - [x] **Phase 2.1: Authentication Foundation** *(Completed)*
     - Real login endpoint (`POST /api/auth/login`) with Argon2id & lockout
     - Session lifecycle, regeneration & hardened cookie parameters
@@ -171,11 +174,17 @@ php tests/test_auth.php
     - Current authenticated user endpoint (`GET /api/auth/me`)
     - Secure logout endpoint (`POST /api/auth/logout`)
     - Automated test runner (`tests/test_auth.php`)
-  - [ ] **Phase 2.2: TOTP 2FA Verification & Enrollment**
-    - QR Code generation for 2FA enrollment
-    - 2FA verification flow (`POST /api/auth/2fa/verify`)
-    - Backup recovery code redemption
-    - Interactive login and 2FA UI templates
+  - [x] **Phase 2.2: RBAC + TOTP Two-Factor Authentication** *(Completed)*
+    - Server-authoritative RBAC across 4 roles (`super_admin`, `admin`, `manager`, `staff`)
+    - Café/branch multi-tenancy authorization boundaries (`user_cafes`)
+    - Privilege escalation prevention (`canManageRole`, `canAssignRole`)
+    - Zero-dependency local vector SVG QR code synthesis (`QrCodeService`)
+    - Authenticated 2FA enrollment flow (`POST /api/auth/2fa/setup`)
+    - TOTP enrollment confirmation & login verification (`POST /api/auth/2fa/verify`)
+    - Single-use hashed backup recovery codes (8 codes, bcrypt hashes)
+    - Safe 2FA status endpoint (`GET /api/auth/2fa/status`)
+    - Verification rate limiting and sensitive secret scrubbing
+    - Automated security test suite (`tests/test_rbac_2fa.php`)
 - [ ] **Phase 3: Geofenced & Live Selfie Attendance Workflow**
   - Camera capture interface (`MediaDevices.getUserMedia`)
   - Geolocation acquisition & client-side accuracy display
