@@ -1,0 +1,52 @@
+# Environment and credentials
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Uploads & Private Storage
+storage/uploads/*
+!storage/uploads/.gitkeep
+storage/uploads/attendance/*
+!storage/uploads/attendance/.gitkeep
+storage/logs/*
+!storage/logs/.gitkeep
+storage/cache/*
+!storage/cache/.gitkeep
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Dependency and Package Caches (if any local tools used)
+vendor/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database exports & SQL dumps
+*.sql.gz
+*.sql.tar.gz
+database/backups/*
+!database/backups/.gitkeep
+
+# Temporary / Scratch Files
+scratch/
+tmp/
+temp/

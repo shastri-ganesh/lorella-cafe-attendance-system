@@ -1,0 +1,30 @@
+# ----------------------------------------------------------------------
+# Lorella Speciality Cafe - Root Apache Configuration (Hostinger / Apache)
+# ----------------------------------------------------------------------
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Prevent directory listing
+    Options -Indexes
+
+    # Block access to hidden files and directories (e.g. .git, .env)
+    RewriteRule ^(\.git|\.env|composer\.|package\.) - [F,L]
+
+    # Block direct HTTP access to protected internal directories
+    RewriteRule ^(app|config|database|storage|docs|tests|scripts)($|/) - [F,L]
+
+    # Route all other requests to the public/ folder if not already requested
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Fallback security if mod_rewrite is disabled
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Deny from all
+    </IfModule>
+</FilesMatch>

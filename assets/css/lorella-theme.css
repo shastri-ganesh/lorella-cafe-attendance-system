@@ -1,0 +1,282 @@
+/**
+ * Lorella Speciality Cafe - Design System Foundation
+ * Premium, Elegant, Warm Café Aesthetic
+ */
+
+:root {
+    /* Brand Wine Palette */
+    --color-wine-900: #290A11;
+    --color-wine-800: #3D0E19;
+    --color-wine-700: #4A1521; /* Core Brand Burgundy */
+    --color-wine-600: #5E1A2A;
+    --color-wine-500: #782337;
+    --color-wine-100: #F7EDF0;
+
+    /* Warm Cream & Surface Palette */
+    --color-cream-50: #FCFAF7;
+    --color-cream-100: #F8F4EE; /* Background Canvas */
+    --color-cream-200: #F1E9DC;
+    --color-cream-300: #E5D9C5;
+    
+    /* Muted Gold & Brass Accents */
+    --color-gold-300: #DFCAAB;
+    --color-gold-400: #CEB18A;
+    --color-gold-500: #B8935F; /* Primary Accent */
+    --color-gold-600: #9E7946;
+
+    /* Semantic Status */
+    --color-success: #2A6E4E;
+    --color-success-bg: #EAF5EE;
+    --color-warning: #9C6517;
+    --color-warning-bg: #FCF6EC;
+    --color-danger: #8E2020;
+    --color-danger-bg: #FAEBEB;
+    --color-info: #225C7D;
+    --color-info-bg: #EBF4F9;
+
+    /* Text & Neutral */
+    --color-text-main: #211D1A;
+    --color-text-muted: #6B625B;
+    --color-text-light: #9C9187;
+    --color-border: #E8E0D5;
+    --color-border-hover: #D6C8B7;
+
+    /* Shadows & Elevations */
+    --shadow-sm: 0 2px 6px rgba(41, 10, 17, 0.04);
+    --shadow-md: 0 6px 18px rgba(41, 10, 17, 0.06);
+    --shadow-lg: 0 12px 32px rgba(41, 10, 17, 0.08);
+
+    /* Typography */
+    --font-heading: 'Cinzel', 'Playfair Display', Georgia, serif;
+    --font-ui: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+
+    /* Radii */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 18px;
+    --radius-pill: 9999px;
+}
+
+/* Base Body Styles */
+body.lorella-app-body {
+    background-color: var(--color-cream-100);
+    color: var(--color-text-main);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header & Navigation */
+.lorella-navbar {
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--color-border);
+    padding: 0.85rem 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.brand-crest {
+    color: var(--color-gold-500);
+    font-size: 1.25rem;
+}
+
+.brand-name {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 1.25rem;
+    letter-spacing: 0.08em;
+    color: var(--color-wine-700);
+}
+
+.brand-sub {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-gold-600);
+    font-weight: 500;
+    border-left: 1px solid var(--color-border);
+    padding-left: 0.5rem;
+    margin-left: 0.25rem;
+}
+
+.brand-monogram {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto;
+    border-radius: 50%;
+    background: var(--color-wine-100);
+    color: var(--color-wine-700);
+    font-family: var(--font-heading);
+    font-size: 1.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(74, 21, 33, 0.12);
+}
+
+.system-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius-pill);
+    background: var(--color-cream-50);
+    border: 1px solid var(--color-border);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-success);
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(42, 110, 78, 0.2);
+}
+
+/* Card Foundation */
+.lorella-card {
+    background: #FFFFFF;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.lorella-title {
+    font-family: var(--font-heading);
+    color: var(--color-wine-700);
+    font-size: 1.65rem;
+    font-weight: 600;
+}
+
+.lorella-subtitle {
+    color: var(--color-text-muted);
+    font-size: 0.9rem;
+}
+
+/* Status Checklist Foundation */
+.foundation-status {
+    background: var(--color-cream-50);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 1rem 1.25rem;
+}
+
+.status-row {
+    display: flex;
+    align-items: center;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid rgba(232, 224, 213, 0.5);
+    font-size: 0.88rem;
+    font-weight: 500;
+}
+
+.status-row:last-child {
+    border-bottom: none;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.75rem;
+}
+
+.status-dot.success {
+    background-color: var(--color-success);
+}
+
+.badge-soft {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.2rem 0.55rem;
+    border-radius: var(--radius-pill);
+    background: var(--color-wine-100);
+    color: var(--color-wine-700);
+}
+
+/* Buttons */
+.lorella-btn-primary {
+    display: inline-block;
+    background: var(--color-wine-700);
+    color: #FFFFFF !important;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    font-size: 0.88rem;
+    padding: 0.65rem 1.4rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-wine-800);
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.lorella-btn-primary:hover {
+    background: var(--color-wine-600);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(74, 21, 33, 0.25);
+}
+
+.lorella-btn-secondary {
+    display: inline-block;
+    background: var(--color-cream-100);
+    color: var(--color-text-main) !important;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    font-size: 0.88rem;
+    padding: 0.65rem 1.4rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.lorella-btn-secondary:hover {
+    background: var(--color-cream-200);
+    border-color: var(--color-border-hover);
+}
+
+/* Form Inputs */
+.lorella-input {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    font-size: 0.95rem;
+    background: #FFFFFF;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.lorella-input:focus {
+    border-color: var(--color-wine-700);
+    box-shadow: 0 0 0 3px rgba(74, 21, 33, 0.12);
+    outline: none;
+}
+
+/* Mobile App Bar (Ready for PWA) */
+.lorella-mobile-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #FFFFFF;
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-around;
+    padding: 0.5rem 0.25rem calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+    z-index: 1000;
+}
+
+/* Responsive adjustments */
+@media (max-width: 576px) {
+    .brand-sub {
+        display: none;
+    }
+    .lorella-card {
+        padding: 1.5rem !important;
+    }
+}
