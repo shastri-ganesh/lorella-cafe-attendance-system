@@ -52,46 +52,67 @@ Security is baked into the foundation of the Lorella Attendance platform rather 
 
 ---
 
-## 2. Authentication Architecture
+## 2. Authentication Lifecycle & Session Architecture
 
-### 2.1. Password Hashing
-- Algorithm: `PASSWORD_ARGON2ID` (with fallback to Bcrypt `cost=12` on systems lacking Argon2id).
-- Parameters: `memory_cost = 65536 KB`, `time_cost = 4`, `threads = 2`.
-- Automatic Rehashing: `AuthService::needsRehash()` evaluates hashes on successful login and automatically upgrades them if security parameters have escalated.
+### 2.1. Password Hashing & Dynamic Rehashing
+- Algorithm: `PASSWORD_ARGON2ID` (with fallback to Bcrypt `cost=12` on systems lacking Argon2id in runtime).
+- Parameters: `memory_cost = 65536 KB` (64MB), `time_cost = 4`, `threads = 2`.
+- Automatic Rehashing: `AuthService::needsRehash()` evaluates hashes on successful authentication. If legacy parameters or algorithms are detected (e.g. outdated cost factors), the password is automatically rehashed and upgraded in the database without disrupting the user.
 
-### 2.2. Session Hardening
-- `session.use_strict_mode = 1`: Reject uninitialized session IDs provided by clients.
-- `session.use_only_cookies = 1`: Disallow session ID passing via URL parameters.
-- `session_regenerate_id(true)`: Invoked immediately upon login, privilege escalation, or 2FA verification to defeat session fixation attacks.
-- Cookie flags: `HttpOnly = true` (mitigates XSS cookie theft), `SameSite = Lax` (mitigates CSRF), `Secure = true` (enforced when HTTPS is active).
+### 2.2. Session Hardening & Lifecycle
+- `session.use_strict_mode = 1`: Reject uninitialized session IDs supplied by clients.
+- `session.use_only_cookies = 1`: Disallow session ID transmission via query strings or URL rewriting.
+- `session_regenerate_id(true)`: Invoked immediately upon password authentication, authentication state transitions, or privilege escalations to eliminate session fixation vulnerabilities.
+- Cookie flags: `HttpOnly = true` (blocks client-side JavaScript access / XSS theft), `SameSite = Lax` (CSRF defense), `Secure = true` (enforced when HTTPS is active).
+- `localStorage` is explicitly forbidden for authentication state or sensitive tokens; identity relies solely on server-authoritative PHP sessions.
 
-### 2.3. Brute-Force & Account Lockout
-- Managed via `RateLimitMiddleware` and `users.failed_attempts` tracking.
-- After 5 consecutive invalid credentials within a 15-minute window, the account is locked for 15 minutes (`locked_until`).
-- Lockouts and failed login bursts are audited with IP address and User-Agent.
+### 2.3. Login Protection & Account Lockout
+- Managed collaboratively by `RateLimitMiddleware` (IP/path sliding window) and `UserRepository::incrementFailedAttempts()` (per-account counter).
+- Generic Error Policy: Authentication failures return generic error messages (`"Invalid credentials."`) with HTTP 401. The system never reveals whether an email exists, whether a password is incorrect, or whether an account is inactive.
+- Lockout Threshold: After 5 consecutive failed login attempts, the account is locked for 15 minutes (`locked_until`).
+- Lockout Enforcement: While locked, login requests return HTTP 423 (`"Account is temporarily locked due to excessive failed attempts. Please try again later."`).
+- Counter Reset: Successful authentication immediately resets `failed_attempts = 0` and clears `locked_until`.
+- Audit Trails: Failed attempts, successful logins, and account lockouts are logged with client IP and User-Agent via `AuditService`.
+
+### 2.4. Trusted Server-Side Identity Model
+- Clients are never permitted to declare or override their identity, role, café scope, or authentication state through request headers or body parameters (`user_id`, `role`, `cafe_id`, `auth_state`).
+- Identity and authorization boundaries are populated strictly on the server from validated database records:
+  - `$_SESSION['auth_state']`: `'authenticated'` (Staff) or `'2fa_pending'` (Privileged).
+  - `$_SESSION['user_id']`: Numeric verified primary key.
+  - `$_SESSION['user_role']`: Server-resolved role slug.
+  - `$_SESSION['user_cafe_ids']`: Authorized café branch primary keys.
 
 ---
 
-## 3. Two-Factor Authentication (RFC 6238 TOTP)
+## 3. Two-Stage Authentication & 2FA Pending State
 
 ### 3.1. Role Policy
-- Mandatory for: `super_admin`, `admin`, `manager`.
-- Optional/Exempt for: `staff`.
+- **Staff**: Non-privileged role. Upon password verification, granted immediate authenticated session (`auth_state = 'authenticated'`).
+- **Privileged Roles (Manager, Admin, Super Admin)**: Mandatory RFC 6238 TOTP 2FA.
 
-### 3.2. Two-Stage Authentication Workflow
-1. User provides valid primary credentials (email + password).
-2. If the user's role requires 2FA or 2FA is enabled:
-   - Full session is NOT granted.
-   - An ephemeral session state `$_SESSION['2fa_pending'] = true` is established.
-   - `AuthMiddleware` rejects any access to privileged API routes until 2FA is satisfied.
-3. User enters 6-digit TOTP code (or single-use backup recovery code).
-4. `TotpService::verifyCode()` performs time-step calculation with `±1` window tolerance (compensating for 30 seconds of client clock drift).
-5. Upon verification, `$_SESSION['2fa_pending']` is cleared and `session_regenerate_id(true)` is invoked.
+### 3.2. Two-Stage Authentication Architecture
+1. **Stage 1 (Password Verification)**: User submits email/login and password.
+2. **State Transition**:
+   - For privileged roles, full access is NOT granted.
+   - Session is initialized with:
+     ```php
+     $_SESSION['auth_state'] = '2fa_pending';
+     $_SESSION['2fa_pending'] = true;
+     $_SESSION['pending_user_id'] = $userId;
+     $_SESSION['pending_role'] = $roleSlug;
+     ```
+   - Privileged user ID (`$_SESSION['user_id']`) remains unset.
+3. **Middleware Enforcement (`AuthMiddleware`)**:
+   - `UNAUTHENTICATED`: Requests to protected routes rejected with HTTP 401.
+   - `2FA_PENDING`:
+     - Access to `/api/auth/me`, `/api/auth/logout`, and `/api/auth/2fa/verify` is permitted.
+     - Access to all other routes (attendance, users, cafes, leave, reports, settings) is blocked with HTTP 403 (`"Two-factor authentication verification required."`).
+4. **Stage 2 (TOTP Verification — Phase 2.2)**: User enters 6-digit TOTP code; upon successful verification, session state transitions to `auth_state = 'authenticated'` and `session_regenerate_id(true)` is executed.
 
 ### 3.3. Backup Recovery Codes
 - 8 high-entropy, single-use codes (`XXXX-XXXX`) generated during enrollment.
 - Stored exclusively as password hashes (`password_hash()`) in `recovery_codes`.
-- Once verified, the record is marked with `used_at = NOW()` and cannot be replayed.
+- Once verified, records are marked with `used_at = CURRENT_TIMESTAMP` and cannot be replayed.
 
 ---
 

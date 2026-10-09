@@ -38,7 +38,7 @@ class AuditService
                     old_values, new_values, ip_address, user_agent, created_at
                 ) VALUES (
                     :user_id, :cafe_id, :action, :entity_type, :entity_id,
-                    :old_values, :new_values, :ip_address, :user_agent, NOW()
+                    :old_values, :new_values, :ip_address, :user_agent, CURRENT_TIMESTAMP
                 )
             ");
 

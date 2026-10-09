@@ -143,11 +143,17 @@ class Router
 
         try {
             // Execute route middleware pipeline
-            foreach ($matchedRoute['middleware'] as $middlewareClass) {
-                if (is_string($middlewareClass) && class_exists($middlewareClass)) {
-                    $middleware = new $middlewareClass();
-                    if (method_exists($middleware, 'handle')) {
-                        $result = $middleware->handle($request);
+            foreach ($matchedRoute['middleware'] as $middleware) {
+                if (is_callable($middleware)) {
+                    $result = call_user_func($middleware, $request);
+                    if ($result instanceof Response) {
+                        $result->send();
+                        return;
+                    }
+                } elseif (is_string($middleware) && class_exists($middleware)) {
+                    $instance = new $middleware();
+                    if (method_exists($instance, 'handle')) {
+                        $result = $instance->handle($request);
                         if ($result instanceof Response) {
                             $result->send();
                             return;

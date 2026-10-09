@@ -26,12 +26,13 @@ All API endpoints reside beneath the `/api` prefix and return JSON with standard
 ### 1.2. HTTP Status Code Conventions
 - `200 OK`: Request succeeded.
 - `201 Created`: Resource successfully created.
-- `400 Bad Request`: Malformed payload or validation error.
-- `401 Unauthorized`: Session absent or expired.
-- `403 Forbidden`: Authenticated, but role or café boundary disallowed access.
+- `400 Bad Request`: Missing mandatory fields or malformed JSON payload.
+- `401 Unauthorized`: Invalid credentials, session absent, or session expired.
+- `403 Forbidden`: Authenticated, but role disallowed access, or 2FA verification pending.
 - `404 Not Found`: Target entity or endpoint does not exist.
 - `419 Authentication Timeout`: Missing or invalid CSRF token.
-- `422 Unprocessable Content`: Missing mandatory fields.
+- `422 Unprocessable Content`: Validation constraint failure.
+- `423 Locked`: Account temporarily locked due to excessive failed login attempts.
 - `429 Too Many Requests`: Rate limit exceeded.
 - `500 Internal Server Error`: Unhandled application exception.
 
@@ -44,7 +45,7 @@ All API endpoints reside beneath the `/api` prefix and return JSON with standard
 #### `GET /api/auth/csrf`
 - **Description**: Returns fresh CSRF token for Single-Page and PWA clients.
 - **Auth**: Public.
-- **Response**:
+- **Response (200 OK)**:
 ```json
 {
   "success": true,
@@ -56,54 +57,144 @@ All API endpoints reside beneath the `/api` prefix and return JSON with standard
 ```
 
 #### `POST /api/auth/login`
-- **Description**: Primary credential authentication.
-- **Auth**: Public (Rate-limited to 5 attempts / 15 minutes).
+- **Description**: Primary credential authentication. Automatically enforces rate limiting (5 attempts/15 min) and account lockout.
+- **Auth**: Public.
 - **Request Body**:
 ```json
 {
-  "email": "employee@lorellacafe.com",
-  "password": "Password123!"
+  "login": "employee@lorellacafe.com",
+  "password": "SecretPassword123!"
 }
 ```
-- **Response (Standard Staff)**:
+*(Accepts either `"login"` or `"email"` as identifier)*
+
+- **Response — Standard Staff (200 OK)**:
 ```json
 {
   "success": true,
-  "message": "Authentication successful",
+  "message": "Login successful.",
   "data": {
-    "user": { "id": 12, "name": "Alex Smith", "role": "staff" },
-    "requires_2fa": false
+    "requires_2fa": false,
+    "auth_state": "authenticated",
+    "user": {
+      "id": 10,
+      "full_name": "Sarah Staff",
+      "email": "staff@lorellacafe.com",
+      "role": "staff",
+      "status": "active"
+    }
   }
 }
 ```
-- **Response (Privileged Role requiring 2FA)**:
+
+- **Response — Privileged Role Requiring 2FA (200 OK)**:
 ```json
 {
   "success": true,
-  "message": "Two-factor verification required",
+  "message": "Two-factor authentication verification required.",
   "data": {
+    "requires_2fa": true,
+    "auth_state": "2fa_pending"
+  }
+}
+```
+
+- **Response — Invalid Credentials (401 Unauthorized)**:
+```json
+{
+  "success": false,
+  "message": "Invalid credentials.",
+  "errors": []
+}
+```
+*(Generic error preventing user/email enumeration)*
+
+- **Response — Account Locked (423 Locked)**:
+```json
+{
+  "success": false,
+  "message": "Account is temporarily locked due to excessive failed attempts. Please try again later.",
+  "errors": []
+}
+```
+
+#### `GET /api/auth/me`
+- **Description**: Retrieves sanitized identity profile of currently authenticated user or 2FA pending state.
+- **Auth**: Active session (Authenticated or 2FA Pending).
+
+- **Response — Authenticated Staff (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Current authenticated user profile",
+  "data": {
+    "authenticated": true,
+    "auth_state": "authenticated",
+    "requires_2fa": false,
+    "user": {
+      "id": 10,
+      "full_name": "Sarah Staff",
+      "email": "staff@lorellacafe.com",
+      "role": "staff",
+      "status": "active"
+    },
+    "cafes": [
+      {
+        "id": 1,
+        "name": "Lorella Flagship",
+        "code": "LOR-MAIN-01",
+        "address": "100 Speciality Blvd",
+        "timezone": "Asia/Kolkata",
+        "is_primary": 1
+      }
+    ]
+  }
+}
+```
+
+- **Response — Privileged User with 2FA Pending (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Two-factor authentication verification required.",
+  "data": {
+    "authenticated": false,
+    "auth_state": "2fa_pending",
     "requires_2fa": true
   }
 }
 ```
 
-#### `POST /api/auth/2fa/verify`
+- **Response — Unauthenticated (401 Unauthorized)**:
+```json
+{
+  "success": false,
+  "message": "Unauthenticated. Please log in.",
+  "errors": []
+}
+```
+
+#### `POST /api/auth/logout`
+- **Description**: Securely clears session variables, revokes session cookie, records audit trail, and destroys session (works for both fully authenticated and 2FA pending sessions).
+- **Auth**: Active session.
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Logged out successfully",
+  "data": []
+}
+```
+
+#### `POST /api/auth/2fa/verify` *(Phase 2.2 Target)*
 - **Description**: Validates RFC 6238 TOTP code or recovery code.
-- **Auth**: Session with `2fa_pending=true`.
+- **Auth**: Session with `auth_state = "2fa_pending"`.
 - **Request Body**:
 ```json
 {
   "code": "489123"
 }
 ```
-
-#### `POST /api/auth/logout`
-- **Description**: Terminates session, clears session cookies.
-- **Auth**: Session.
-
-#### `GET /api/auth/me`
-- **Description**: Returns current authenticated user profile and café assignments.
-- **Auth**: Session.
 
 ---
 

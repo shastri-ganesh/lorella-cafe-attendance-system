@@ -80,21 +80,22 @@ class UserRepository
     }
 
     /**
-     * Increment failed login attempts.
+     * Increment failed login attempts and lock account if threshold reached.
      */
     public function incrementFailedAttempts(int $userId, int $lockoutMinutes = 15, int $threshold = 5): void
     {
+        $lockoutUntil = date('Y-m-d H:i:s', time() + ($lockoutMinutes * 60));
+
         $stmt = $this->db->prepare("
             UPDATE users 
             SET failed_attempts = failed_attempts + 1,
-                locked_until = IF(failed_attempts + 1 >= :threshold, DATE_ADD(NOW(), INTERVAL :lockout MINUTE), locked_until)
+                locked_until = CASE WHEN (failed_attempts + 1) >= :threshold THEN :lockout_until ELSE locked_until END
             WHERE id = :id
         ");
-        $stmt->execute([
-            ':threshold' => $threshold,
-            ':lockout' => $lockoutMinutes,
-            ':id' => $userId,
-        ]);
+        $stmt->bindValue(':threshold', (int) $threshold, \PDO::PARAM_INT);
+        $stmt->bindValue(':lockout_until', $lockoutUntil, \PDO::PARAM_STR);
+        $stmt->bindValue(':id', (int) $userId, \PDO::PARAM_INT);
+        $stmt->execute();
     }
 
     /**
@@ -106,5 +107,57 @@ class UserRepository
             UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = :id
         ");
         $stmt->execute([':id' => $userId]);
+    }
+
+    /**
+     * Check if account is currently locked.
+     */
+    public function isAccountLocked(array $user): bool
+    {
+        if (empty($user['locked_until'])) {
+            return false;
+        }
+        return strtotime($user['locked_until']) > time();
+    }
+
+    /**
+     * Update password hash when rehashing is required.
+     */
+    public function updatePasswordHash(int $userId, string $newHash): void
+    {
+        $stmt = $this->db->prepare("
+            UPDATE users SET password_hash = :hash WHERE id = :id
+        ");
+        $stmt->execute([':hash' => $newHash, ':id' => $userId]);
+    }
+
+    /**
+     * Update user last login timestamp.
+     */
+    public function updateLastLogin(int $userId): void
+    {
+        $stmt = $this->db->prepare("
+            UPDATE users SET last_login_at = :login_time WHERE id = :id
+        ");
+        $stmt->execute([
+            ':login_time' => date('Y-m-d H:i:s'),
+            ':id' => $userId,
+        ]);
+    }
+
+    /**
+     * Fetch user's assigned café details (safe fields only).
+     */
+    public function getAssignedCafes(int $userId): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT c.id, c.name, c.code, c.address, c.timezone, uc.is_primary
+            FROM user_cafes uc
+            JOIN cafes c ON uc.cafe_id = c.id
+            WHERE uc.user_id = :user_id AND c.status = 'active'
+            ORDER BY uc.is_primary DESC, c.name ASC
+        ");
+        $stmt->execute([':user_id' => $userId]);
+        return $stmt->fetchAll();
     }
 }

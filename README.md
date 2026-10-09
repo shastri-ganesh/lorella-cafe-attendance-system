@@ -140,17 +140,21 @@ The script will output:
 - `otpauth://` URI for Google Authenticator / Authy
 - 8 single-use backup recovery codes
 
-### 6.4. Run Verification Test Suite
-Validate the core mathematical algorithms and autoloader:
+### 6.4. Run Verification Test Suites
+Validate the core mathematical algorithms, autoloader, and authentication lifecycle:
 ```bash
+# Foundation Tests (Geofence, TOTP math, Autoloader, Env)
 php tests/test_foundation.php
+
+# Authentication Lifecycle Tests (Login, Sessions, Lockout, 2FA Pending, Rehash)
+php tests/test_auth.php
 ```
 
 ---
 
 ## 7. Development Roadmap & Status
 
-- [x] **Phase 1: Project Foundation & Architecture** *(Current Phase)*
+- [x] **Phase 1: Project Foundation & Architecture**
   - Framework-independent PHP 8.4+ PSR-4 core architecture
   - Normalized MySQL 8+ multi-branch schema & indexes
   - Pure PHP RFC 6238 TOTP engine & Haversine geofence service
@@ -160,10 +164,18 @@ php tests/test_foundation.php
   - PWA manifest and service worker shell
   - Complete documentation suite (`/docs`)
 - [ ] **Phase 2: Authentication & TOTP 2FA Implementation**
-  - Interactive login view & controller implementation
-  - QR Code generation for 2FA enrollment
-  - 2FA verification flow & backup recovery code redemption
-  - Session timeout and lockout enforcement
+  - [x] **Phase 2.1: Authentication Foundation** *(Completed)*
+    - Real login endpoint (`POST /api/auth/login`) with Argon2id & lockout
+    - Session lifecycle, regeneration & hardened cookie parameters
+    - Two-stage 2FA pending state (`auth_state = '2fa_pending'`)
+    - Current authenticated user endpoint (`GET /api/auth/me`)
+    - Secure logout endpoint (`POST /api/auth/logout`)
+    - Automated test runner (`tests/test_auth.php`)
+  - [ ] **Phase 2.2: TOTP 2FA Verification & Enrollment**
+    - QR Code generation for 2FA enrollment
+    - 2FA verification flow (`POST /api/auth/2fa/verify`)
+    - Backup recovery code redemption
+    - Interactive login and 2FA UI templates
 - [ ] **Phase 3: Geofenced & Live Selfie Attendance Workflow**
   - Camera capture interface (`MediaDevices.getUserMedia`)
   - Geolocation acquisition & client-side accuracy display

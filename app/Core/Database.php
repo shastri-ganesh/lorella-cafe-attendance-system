@@ -26,6 +26,14 @@ class Database
     }
 
     /**
+     * Set explicit PDO instance (e.g. for testing).
+     */
+    public static function setConnection(PDO $pdo): void
+    {
+        self::$instance = $pdo;
+    }
+
+    /**
      * Get or create PDO singleton connection.
      */
     public static function getConnection(): PDO

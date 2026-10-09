@@ -68,7 +68,7 @@ $router->group(['prefix' => '/api'], function (Router $api) {
             RateLimitMiddleware::per(5, 900), // Max 5 attempts per 15 min window
         ]);
         $auth->post('/2fa/verify', [AuthController::class, 'verifyTwoFactor']);
-        $auth->post('/logout', [AuthController::class, 'logout']);
+        $auth->post('/logout', [AuthController::class, 'logout'], [AuthMiddleware::class]);
         $auth->get('/me', [AuthController::class, 'me'], [AuthMiddleware::class]);
     });
 
